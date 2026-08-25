@@ -1,0 +1,2 @@
+import ModulePlaceholder from './ModulePlaceholder';
+export default function EsfuerzosScreen(){return <ModulePlaceholder title="Registro de esfuerzos" description="Crear, consultar, editar y cerrar acciones de mercadotecnia, comunicación y ventas." features={['Nombre, familia, palanca y objetivo','Productos, promociones y medios asociados','Periodo, responsable, sucursal y costo opcional','Meta, observaciones y estado del esfuerzo']}/>}

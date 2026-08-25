@@ -1,0 +1,2 @@
+import ModulePlaceholder from './ModulePlaceholder';
+export default function PalancasScreen(){return <ModulePlaceholder title="Resumen ejecutivo de palancas" description="Vista secundaria dedicada a Cliente Nuevo, Ticket promedio, Recompra y Recomendación." features={['Cambios por palanca y periodo','Esfuerzos vinculados a cada objetivo','Productos, promociones y medios destacados','Alertas por caída o mejora significativa']}/>}

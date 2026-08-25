@@ -1,0 +1,1 @@
+{"scripts":{"start":"node index.js","dev":"nodemon index.js"},"dependencies":{"axios":"latest","cors":"latest","csv-parse":"latest","dotenv":"latest","express":"latest","mongoose":"latest","present":"^1.0.0","scripts":"^0.1.0"},"devDependencies":{"nodemon":"latest"}}
