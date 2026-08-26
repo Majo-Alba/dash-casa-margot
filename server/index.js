@@ -54,17 +54,24 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/sales', salesRoutes);
 app.use('/api/intelligence', intelligenceRoutes);
 
-async function start() {
-  await connectDB();
+function start() {
+  // DASH currently reads business data from Google Sheets, so MongoDB
+  // should never prevent the HTTP server from becoming available.
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`DASH server running on port ${PORT}`);
   });
+
+  // Connect in the background. If Atlas is waking up, misconfigured, or
+  // temporarily unavailable, Render can still answer /api/health and the
+  // Google-Sheets-backed dashboard endpoints.
+  connectDB().catch((error) => {
+    console.error('[MongoDB] background connection error:', error.message);
+  });
 }
 
-start().catch((error) => {
-  console.error('[Startup] fatal error:', error);
-  process.exit(1);
-});
+start();
+
+
 
 
 // -----> LAST FUNCTIONAL AUG26/26 <-----
