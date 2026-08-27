@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 const salesRoutes = require('./routes/salesRoutes');
 const intelligenceRoutes = require('./routes/intelligenceRoutes');
+const { warmDataCache } = require('./services/intelligenceService');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -67,6 +68,12 @@ function start() {
   connectDB().catch((error) => {
     console.error('[MongoDB] background connection error:', error.message);
   });
+
+  // Preload Casa Margot's Google Sheets in the background so the first
+  // dashboard interaction does not pay the full Google export latency.
+  setTimeout(() => {
+    warmDataCache();
+  }, 500);
 }
 
 start();

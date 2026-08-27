@@ -21,7 +21,59 @@ function date(v){
   if(/^\d{4}-\d{1,2}-\d{1,2}/.test(s)){const [y,m,d]=s.slice(0,10).split('-').map(Number); return new Date(y,m-1,d,12);}
   const d=new Date(s); return Number.isNaN(d.getTime())?null:d;
 }
-async function csv(url){ const {data}=await axios.get(url,{timeout:20000}); if(!String(data||'').trim()) return []; return parse(data,{columns:true,skip_empty_lines:true,trim:true,bom:true,relax_column_count:true}); }
+const REQUIRED_SHEET_TIMEOUT_MS = Number(process.env.DASH_REQUIRED_SHEET_TIMEOUT_MS) || 45000;
+const OPTIONAL_SHEET_TIMEOUT_MS = Number(process.env.DASH_OPTIONAL_SHEET_TIMEOUT_MS) || 6000;
+const SHEET_CACHE_TTL_MS = Number(process.env.DASH_SHEET_CACHE_TTL_MS) || 600000;
+const ENABLE_OPTIONAL_SOURCES = String(process.env.DASH_ENABLE_OPTIONAL_SOURCES || 'false').toLowerCase() === 'true';
+const sheetCache = new Map();
+const sheetPromises = new Map();
+
+async function csvSource(name, url, { optional = false, force = false } = {}) {
+  const now = Date.now();
+  const cached = sheetCache.get(name);
+  if (!force && cached && now < cached.expiresAt) return cached.rows;
+  if (!force && sheetPromises.has(name)) return sheetPromises.get(name);
+
+  const timeout = optional ? OPTIONAL_SHEET_TIMEOUT_MS : REQUIRED_SHEET_TIMEOUT_MS;
+  const promise = (async () => {
+    const startedAt = Date.now();
+    try {
+      const { data } = await axios.get(url, {
+        timeout,
+        responseType: 'text',
+        maxRedirects: 5,
+        headers: {
+          'User-Agent': 'DASH-Casa-Margot/1.0',
+          'Accept': 'text/csv,text/plain;q=0.9,*/*;q=0.8'
+        }
+      });
+      const raw = String(data || '').trim();
+      const rows = raw ? parse(raw, {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+        bom: true,
+        relax_column_count: true
+      }) : [];
+      sheetCache.set(name, { rows, expiresAt: Date.now() + SHEET_CACHE_TTL_MS });
+      console.log(`[DASH source] ${name}: ${rows.length} rows in ${Date.now() - startedAt}ms`);
+      return rows;
+    } catch (error) {
+      console.error(`[DASH source] ${name} failed after ${Date.now() - startedAt}ms: ${error.message}`);
+      const stale = sheetCache.get(name);
+      if (stale) {
+        console.warn(`[DASH source] ${name}: serving stale cache`);
+        return stale.rows;
+      }
+      if (optional) return [];
+      throw new Error(`${name}: ${error.message}`);
+    } finally {
+      sheetPromises.delete(name);
+    }
+  })();
+  sheetPromises.set(name, promise);
+  return promise;
+}
 
 function periodFromQuery(q={}){
   const now=new Date(); const year=Number(q.year)||now.getFullYear(); const type=['month','bimonth','quarter','semester','year'].includes(q.type)?q.type:'month';
@@ -96,32 +148,35 @@ function buildFunnel(rows,p){
  return [{stage:'Contactos',value:count(['contacto']),available:true},{stage:'Leads Basura',value:current.filter(r=>['basura','leadbasura','descartado','noaplica'].includes(key(r.status))).length,available:true},{stage:'Prospectos',value:count(['prospecto']),available:true},{stage:'Citas / Visitas',value:count(['cita','visita']),available:true},{stage:'Cotizaciones',value:quoteRows.length,available:true,subcategories:[{name:'Ganadas',value:q(['aceptada','ganada'])},{name:'Pendientes',value:q(['preparacion','enviada','pendiente','seguimiento'])},{name:'Perdidas',value:q(['rechazada','vencida','perdida'])}]},{stage:'Clientes',value:count(['cliente']),available:true}];
 }
 
-const DATA_CACHE_TTL_MS = Number(process.env.DASH_DATA_CACHE_TTL_MS) || 120000;
+const DATA_CACHE_TTL_MS = Number(process.env.DASH_DATA_CACHE_TTL_MS) || 600000;
 let allDataCache = null;
 let allDataCacheExpiresAt = 0;
 let allDataPromise = null;
 
 async function loadAll({ force = false } = {}) {
   const now = Date.now();
-
-  if (!force && allDataCache && now < allDataCacheExpiresAt) {
-    return allDataCache;
-  }
-
-  // If several widgets request data at the same time, reuse the same
-  // Google Sheets download instead of starting five new downloads per request.
-  if (!force && allDataPromise) {
-    return allDataPromise;
-  }
+  if (!force && allDataCache && now < allDataCacheExpiresAt) return allDataCache;
+  if (!force && allDataPromise) return allDataPromise;
 
   allDataPromise = (async () => {
     const startedAt = Date.now();
-    const [contactRows, effortRows, clientRows, productRows, saleRows] = await Promise.all([
-      csv(URLS.contacts),
-      csv(URLS.efforts),
-      csv(URLS.clients),
-      csv(URLS.products),
-      csv(URLS.sales)
+
+    // Casa Margot's pilot currently has data in CLIENTES, PRODUCTOS and VENTAS.
+    // Do not spend network time requesting empty optional tabs until the client
+    // starts populating them. Turn them on later with DASH_ENABLE_OPTIONAL_SOURCES=true.
+    const optionalContactsPromise = ENABLE_OPTIONAL_SOURCES
+      ? csvSource('CONTACTOS_PROCESO', URLS.contacts, { optional: true, force })
+      : Promise.resolve([]);
+    const optionalEffortsPromise = ENABLE_OPTIONAL_SOURCES
+      ? csvSource('ESFUERZOS', URLS.efforts, { optional: true, force })
+      : Promise.resolve([]);
+
+    const [clientRows, productRows, saleRows, contactRows, effortRows] = await Promise.all([
+      csvSource('CLIENTES', URLS.clients, { force }),
+      csvSource('PRODUCTOS', URLS.products, { force }),
+      csvSource('VENTAS', URLS.sales, { force }),
+      optionalContactsPromise,
+      optionalEffortsPromise
     ]);
 
     const normalized = {
@@ -136,14 +191,20 @@ async function loadAll({ force = false } = {}) {
 
     allDataCache = normalized;
     allDataCacheExpiresAt = Date.now() + DATA_CACHE_TTL_MS;
-    console.log(`[DASH data] loaded Casa Margot sheets in ${Date.now() - startedAt}ms`);
+    console.log(`[DASH data] normalized Casa Margot data in ${Date.now() - startedAt}ms`);
     return normalized;
   })();
 
+  try { return await allDataPromise; }
+  finally { allDataPromise = null; }
+}
+
+async function warmDataCache() {
   try {
-    return await allDataPromise;
-  } finally {
-    allDataPromise = null;
+    await loadAll();
+    console.log('[DASH data] cache warm-up complete');
+  } catch (error) {
+    console.error('[DASH data] cache warm-up failed:', error.message);
   }
 }
 
@@ -251,8 +312,7 @@ async function getSalesAnalytics(query={}){
 function buildSalesInsightsCasa({revenueGrowth,avgTicketGrowth,seller,product,channelAvailable}){const a=[];a.push({type:revenueGrowth>=0?'success':'danger',title:revenueGrowth>=0?'Ventas arriba del periodo anterior':'Ventas por debajo del periodo anterior',text:`La venta cambió ${Math.abs(revenueGrowth).toFixed(1)}% frente a la ventana comparable anterior.`});if(product)a.push({type:'success',title:'Producto líder',text:`${product.name} concentra ${product.share.toFixed(1)}% del ingreso del periodo.`});if(seller)a.push({type:seller.share>50?'warning':'success',title:'Concentración comercial',text:`${seller.name} representa ${seller.share.toFixed(1)}% de la venta del periodo.`});a.push({type:channelAvailable?'success':'warning',title:channelAvailable?'Origen de ventas disponible':'Canal de llegada por activar',text:channelAvailable?'Ya es posible comparar ventas por medio de origen.':'Casa Margot todavía no registra MEDIO_ORIGEN de forma confiable; al hacerlo se desbloqueará este cruce.'});return a.slice(0,4);}
 function buildQuestions(x){const q=[]; if(x.salesForce[0])q.push(`${x.salesForce[0].name} concentra ${Math.round(x.salesForce[0].revenueShare)}% de la venta del periodo. ¿Es una fortaleza replicable o una dependencia comercial?`); if(x.topProducts[0])q.push(`${x.topProducts[0].name} es el producto/servicio con mayor venta del periodo. ¿Qué esfuerzos y perfiles de cliente explican su desempeño cuando esos datos estén disponibles?`); q.push(`${x.activeClients} clientes están activos y ${x.repurchasePct.toFixed(1)}% registró recompra en el periodo. ¿Qué acciones podrían elevar esa recurrencia?`); if(!x.contactAvailable)q.push('Aún no se registra el proceso previo a la venta. Capturar contactos y cotizaciones permitirá saber dónde se pierden oportunidades.'); if(!x.effortAvailable)q.push('Aún no hay esfuerzos registrados. Al activarlos, DASH podrá comparar qué cambió antes, durante y después de cada acción.'); return q;}
 
-module.exports={getOverview,getProductsAnalytics,getClientsAnalytics,getSalesAnalytics,periodFromQuery};
-
+module.exports={getOverview,getProductsAnalytics,getClientsAnalytics,getSalesAnalytics,periodFromQuery,warmDataCache};
 
 
 // ----> LAST FUNCTIONAL AUG26/26 <----
