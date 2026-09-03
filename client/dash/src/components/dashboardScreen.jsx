@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ChevronDown, CircleDollarSign, LockKeyhole, RefreshCcw, Share2, Sparkles, Target, Users, UserRoundSearch, PackageSearch } from 'lucide-react';
+import { CalendarDays, ChevronDown, CircleDollarSign, FileDown, LockKeyhole, RefreshCcw, Share2, Sparkles, Target, Users, UserRoundSearch, PackageSearch } from 'lucide-react';
 import AppSidebar from './AppSidebar';
 import { Bar, BarChart, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { getIntelligenceOverview } from '../services/api';
+import { downloadDashboardReport } from '../services/reportPdf';
 
 const money=(n=0)=>new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',maximumFractionDigits:0}).format(Number(n)||0);
 const pct=(n=0)=>`${Math.round((Number(n)||0)*10)/10}%`;
@@ -14,13 +15,14 @@ function optionsFor(type){if(type==='month')return MONTHS.map((m,i)=>({value:i+1
 function Unavailable({title,text}){return <div className="unavailableState"><LockKeyhole size={22}/><div><b>{title}</b><p>{text}</p></div><span>Dato por activar</span></div>}
 
 export default function DashboardScreen(){
- const now=new Date(); const [type,setType]=useState('month'); const [index,setIndex]=useState(now.getMonth()+1); const [year,setYear]=useState(now.getFullYear()); const [data,setData]=useState(fallback); const [loading,setLoading]=useState(true); const [open,setOpen]=useState(false);
+ const now=new Date(); const [type,setType]=useState('month'); const [index,setIndex]=useState(now.getMonth()+1); const [year,setYear]=useState(now.getFullYear()); const [data,setData]=useState(fallback); const [loading,setLoading]=useState(true); const [open,setOpen]=useState(false); const [reportLoading,setReportLoading]=useState(false);
  const choices=useMemo(()=>optionsFor(type),[type]);
  useEffect(()=>{if(!choices.some(x=>x.value===index))setIndex(1)},[type]);
  useEffect(()=>{setLoading(true);getIntelligenceOverview({type,index,year}).then(v=>setData(v||fallback)).catch(e=>{console.error(e);setData(fallback)}).finally(()=>setLoading(false));},[type,index,year]);
  const years=data.periodOptions?.years?.length?data.periodOptions.years:[2026];
+ const handleDownloadReport=async()=>{if(loading||reportLoading)return;try{setReportLoading(true);downloadDashboardReport(data,{type,index,year});}catch(error){console.error('[DASH report]',error);}finally{setReportLoading(false);}};
  return <main className="appShell"><AppSidebar/><div className="dashboard effortDashboard">
-  <header className="topbar"><div><p className="eyebrow">{data.company||'Casa Margot'} · Inteligencia comercial</p><h1>Tablero General</h1><p>Conecta lo que la empresa hace con lo que comercialmente ocurre. {loading?'Actualizando datos…':''}</p></div><div className="periodControl"><button className={open?'periodTrigger open':'periodTrigger'} onClick={()=>setOpen(!open)}><span className="periodTriggerIcon"><CalendarDays size={17}/></span><span className="periodTriggerCopy"><small>Periodo de análisis</small><b>{data.period?.label||'Periodo'}</b></span><ChevronDown className={open?'periodChevron open':''} size={16}/></button>{open&&<div className="periodPopover"><div className="periodPopoverHeader"><span><CalendarDays size={17}/></span><div><b>Periodo de análisis</b><small>Define la ventana que quieres comparar</small></div></div><div className="periodFields"><label><span>Vista</span><select value={type} onChange={e=>setType(e.target.value)}>{PERIOD_TYPES.map(([v,l])=><option value={v} key={v}>{l}</option>)}</select></label><label><span>Periodo</span><select value={index} onChange={e=>setIndex(Number(e.target.value))}>{choices.map(x=><option value={x.value} key={x.value}>{x.label}</option>)}</select></label><label><span>Año</span><select value={year} onChange={e=>setYear(Number(e.target.value))}>{years.map(y=><option value={y} key={y}>{y}</option>)}</select></label></div><button className="applyPeriod" onClick={()=>setOpen(false)}>Aplicar periodo</button></div>}</div></header>
+  <header className="topbar"><div><p className="eyebrow">{data.company||'Casa Margot'} · Inteligencia comercial</p><h1>Tablero General</h1><p>Conecta lo que la empresa hace con lo que comercialmente ocurre. {loading?'Actualizando datos…':''}</p></div><div className="dashboardHeaderActions"><button type="button" className="reportDownloadButton" onClick={handleDownloadReport} disabled={loading||reportLoading}><FileDown size={17}/><span>{reportLoading?'Generando…':'Descargar reporte'}</span></button><div className="periodControl"><button className={open?'periodTrigger open':'periodTrigger'} onClick={()=>setOpen(!open)}><span className="periodTriggerIcon"><CalendarDays size={17}/></span><span className="periodTriggerCopy"><small>Periodo de análisis</small><b>{data.period?.label||'Periodo'}</b></span><ChevronDown className={open?'periodChevron open':''} size={16}/></button>{open&&<div className="periodPopover"><div className="periodPopoverHeader"><span><CalendarDays size={17}/></span><div><b>Periodo de análisis</b><small>Define la ventana que quieres comparar</small></div></div><div className="periodFields"><label><span>Vista</span><select value={type} onChange={e=>setType(e.target.value)}>{PERIOD_TYPES.map(([v,l])=><option value={v} key={v}>{l}</option>)}</select></label><label><span>Periodo</span><select value={index} onChange={e=>setIndex(Number(e.target.value))}>{choices.map(x=><option value={x.value} key={x.value}>{x.label}</option>)}</select></label><label><span>Año</span><select value={year} onChange={e=>setYear(Number(e.target.value))}>{years.map(y=><option value={y} key={y}>{y}</option>)}</select></label></div><button className="applyPeriod" onClick={()=>setOpen(false)}>Aplicar periodo</button></div>}</div></div></header>
 
   <section className="contextStrip"><div><Sparkles size={20}/><span><b>Lectura prioritaria:</b> DASH mantiene visibles los módulos que Casa Margot todavía no puede alimentar para mostrar qué información desbloqueará nuevos análisis.</span></div><small>Periodo: {data.period?.label}</small></section>
 
@@ -49,3 +51,62 @@ export default function DashboardScreen(){
   </div>
  </div></main>;
 }
+
+
+
+// ----> LAST FUNCTIONAL SEP03/26 @ 13:25 <----
+
+
+
+
+// import { useEffect, useMemo, useState } from 'react';
+// import { CalendarDays, ChevronDown, CircleDollarSign, LockKeyhole, RefreshCcw, Share2, Sparkles, Target, Users, UserRoundSearch, PackageSearch } from 'lucide-react';
+// import AppSidebar from './AppSidebar';
+// import { Bar, BarChart, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+// import { getIntelligenceOverview } from '../services/api';
+
+// const money=(n=0)=>new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',maximumFractionDigits:0}).format(Number(n)||0);
+// const pct=(n=0)=>`${Math.round((Number(n)||0)*10)/10}%`;
+// const MONTHS=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+// const PERIOD_TYPES=[['month','Mensual'],['bimonth','Bimestral'],['quarter','Trimestral'],['semester','Semestral'],['year','Anual']];
+// const fallback={company:'Casa Margot',period:{type:'month',index:1,year:2026,label:'Ene 2026'},periodOptions:{years:[2026]},levers:[],commercialSummary:{},funnel:[],effortImpact:{available:false,data:[]},media:{available:false,data:[]},effortResponses:{available:false,data:[]},salesForce:[],topProducts:[],demographics:{available:false},quality:{unavailable:[]},questions:[]};
+// function LeverIcon({type}){const M={users:Users,money:CircleDollarSign,refresh:RefreshCcw,share:Share2};const I=M[type]||Target;return <I size={25}/>}
+// function optionsFor(type){if(type==='month')return MONTHS.map((m,i)=>({value:i+1,label:m}));if(type==='bimonth')return Array.from({length:6},(_,i)=>({value:i+1,label:`${MONTHS[i*2]}-${MONTHS[i*2+1]}`}));if(type==='quarter')return Array.from({length:4},(_,i)=>({value:i+1,label:`Q${i+1}`}));if(type==='semester')return [{value:1,label:'S1'},{value:2,label:'S2'}];return [{value:1,label:'Año completo'}];}
+// function Unavailable({title,text}){return <div className="unavailableState"><LockKeyhole size={22}/><div><b>{title}</b><p>{text}</p></div><span>Dato por activar</span></div>}
+
+// export default function DashboardScreen(){
+//  const now=new Date(); const [type,setType]=useState('month'); const [index,setIndex]=useState(now.getMonth()+1); const [year,setYear]=useState(now.getFullYear()); const [data,setData]=useState(fallback); const [loading,setLoading]=useState(true); const [open,setOpen]=useState(false);
+//  const choices=useMemo(()=>optionsFor(type),[type]);
+//  useEffect(()=>{if(!choices.some(x=>x.value===index))setIndex(1)},[type]);
+//  useEffect(()=>{setLoading(true);getIntelligenceOverview({type,index,year}).then(v=>setData(v||fallback)).catch(e=>{console.error(e);setData(fallback)}).finally(()=>setLoading(false));},[type,index,year]);
+//  const years=data.periodOptions?.years?.length?data.periodOptions.years:[2026];
+//  return <main className="appShell"><AppSidebar/><div className="dashboard effortDashboard">
+//   <header className="topbar"><div><p className="eyebrow">{data.company||'Casa Margot'} · Inteligencia comercial</p><h1>Tablero General</h1><p>Conecta lo que la empresa hace con lo que comercialmente ocurre. {loading?'Actualizando datos…':''}</p></div><div className="periodControl"><button className={open?'periodTrigger open':'periodTrigger'} onClick={()=>setOpen(!open)}><span className="periodTriggerIcon"><CalendarDays size={17}/></span><span className="periodTriggerCopy"><small>Periodo de análisis</small><b>{data.period?.label||'Periodo'}</b></span><ChevronDown className={open?'periodChevron open':''} size={16}/></button>{open&&<div className="periodPopover"><div className="periodPopoverHeader"><span><CalendarDays size={17}/></span><div><b>Periodo de análisis</b><small>Define la ventana que quieres comparar</small></div></div><div className="periodFields"><label><span>Vista</span><select value={type} onChange={e=>setType(e.target.value)}>{PERIOD_TYPES.map(([v,l])=><option value={v} key={v}>{l}</option>)}</select></label><label><span>Periodo</span><select value={index} onChange={e=>setIndex(Number(e.target.value))}>{choices.map(x=><option value={x.value} key={x.value}>{x.label}</option>)}</select></label><label><span>Año</span><select value={year} onChange={e=>setYear(Number(e.target.value))}>{years.map(y=><option value={y} key={y}>{y}</option>)}</select></label></div><button className="applyPeriod" onClick={()=>setOpen(false)}>Aplicar periodo</button></div>}</div></header>
+
+//   <section className="contextStrip"><div><Sparkles size={20}/><span><b>Lectura prioritaria:</b> DASH mantiene visibles los módulos que Casa Margot todavía no puede alimentar para mostrar qué información desbloqueará nuevos análisis.</span></div><small>Periodo: {data.period?.label}</small></section>
+
+//   <div className="leverGrid">{data.levers.map(l=><article className={`leverCard ${l.key} ${!l.available?'disabledLever':''}`} key={l.key}><div className="leverIcon"><LeverIcon type={l.icon}/></div><div><p>{l.name}</p>{l.available?<><h2>{l.key==='ticket'?money(l.value):l.key==='recompra'?pct(l.value):l.value}</h2><span className={(l.change||0)<0?'negative':'positive'}>{(l.change||0)>=0?'↑':'↓'} {pct(Math.abs(l.change||0))}</span></>:<h2>—</h2>}<small>{l.helper}</small></div></article>)}</div>
+
+//   <div className="intelligenceGrid">
+//    <section className="panel funnelPanel"><div className="panelTitle"><div><h3>Conversión Comercial</h3><p>Qué ocurre desde el primer contacto hasta la recompra.</p></div></div><div className="funnelSteps">{data.funnel.map((x,i)=><div key={x.stage} className={`funnelStep ${!x.available?'funnelUnavailable':''}`}><span>{i+1}</span><div><b>{x.stage}</b><small>{x.available?`${x.value??0} registros`:'Sin información disponible'}</small>{x.subcategories&&<div className="quoteBreakdown">{x.subcategories.map(s=><em key={s.name}><i>{s.name}</i><strong>{s.available===false?'—':s.value??0}</strong></em>)}</div>}</div></div>)}</div></section>
+
+//    <section className="panel salesPulse"><div className="panelTitle"><div><h3>Pulso del periodo</h3><p>Resultados que sí pueden calcularse hoy.</p></div></div><div className="pulseGrid"><article><small>Venta total</small><b>{money(data.commercialSummary?.revenue)}</b></article><article><small>Número de ventas</small><b>{data.commercialSummary?.salesCount||0}</b></article><article><small>Unidades / servicios</small><b>{data.commercialSummary?.units||0}</b></article><article><small>Clientes activos</small><b>{data.commercialSummary?.activeClients||0}</b></article><article><small>Dormidos</small><b>{data.commercialSummary?.dormantClients||0}</b></article><article><small>Inactivos</small><b>{data.commercialSummary?.inactiveClients||0}</b></article></div></section>
+
+//    <section className="panel effortImpactPanel"><div className="panelTitle"><div><h3>Impacto de esfuerzos</h3><p>Qué cambió antes, durante y después de cada esfuerzo registrado.</p></div></div>{data.effortImpact?.available&&data.effortImpact?.data?.length?<ResponsiveContainer width="100%" height={310}><ComposedChart data={data.effortImpact.data}><CartesianGrid vertical={false} strokeDasharray="4 6"/><XAxis dataKey="name"/><YAxis allowDecimals={false}/><Tooltip/><Bar dataKey="before" name="Antes" fill="#c7ced6" radius={[6,6,0,0]}/><Bar dataKey="during" name="Durante" fill="#4d9661" radius={[6,6,0,0]}/><Line type="monotone" dataKey="after" name="Después" stroke="#203b5c" strokeWidth={3}/></ComposedChart></ResponsiveContainer>:<Unavailable title="Impacto de esfuerzos" text="Registra ESFUERZOS y vincula CONTACTOS_PROCESO para comparar la captación antes, durante y después de cada acción."/>}</section>
+
+//    <section className="panel mediaPanel"><div className="panelTitle"><div><h3>Medios que atraen y convierten</h3><p>Personas contactadas por medio frente a clientes convertidos.</p></div></div>{data.media?.available&&data.media?.data?.length?<ResponsiveContainer width="100%" height={285}><BarChart data={data.media.data} layout="vertical"><CartesianGrid horizontal={false} strokeDasharray="4 6"/><XAxis type="number" allowDecimals={false}/><YAxis type="category" dataKey="name" width={115}/><Tooltip/><Bar dataKey="contacts" name="Contactos" fill="#c7ced6" radius={[0,7,7,0]}/><Bar dataKey="clients" name="Clientes convertidos" fill="#4d9661" radius={[0,7,7,0]}/></BarChart></ResponsiveContainer>:<Unavailable title="Medios de llegada" text="Captura ID_MEDIO o MEDIO_ESPECIFICO en CONTACTOS_PROCESO para descubrir qué medios atraen volumen y cuáles convierten."/>}</section>
+
+//    <section className="panel effortTablePanel"><div className="panelTitle"><div><h3>Esfuerzos con mayor respuesta</h3><p>Contactos, clientes convertidos y venta vinculada a cada esfuerzo.</p></div></div>{data.effortResponses?.available&&data.effortResponses?.data?.length?<div className="compactTable"><div className="compactRow header"><span>Esfuerzo</span><span>Contactos</span><span>Clientes</span><span>Ventas</span></div>{data.effortResponses.data.map(x=><div className="compactRow" key={x.id||x.name}><span>{x.name}</span><b>{x.contacts??0}</b><b>{x.clients??0}</b><b>{money(x.sales)}</b></div>)}</div>:<Unavailable title="Respuesta por esfuerzo" text="Al registrar y relacionar esfuerzos, DASH mostrará cuáles coinciden con más contactos, conversiones y ventas."/>}</section>
+
+//    <section className="panel salesForcePanel"><div className="panelTitle"><div><h3>Fuerza de ventas</h3><p>Quién vende, cuánto vende y qué peso tiene en el periodo.</p></div></div>{data.salesForce?.length?<div className="dataTable"><div className="dataRow dataHead"><span>Vendedor</span><span>Venta</span><span>Unidades</span><span>Ticket</span><span>% periodo</span></div>{data.salesForce.map(x=><div className="dataRow" key={x.name}><b>{x.name}</b><span>{money(x.revenue)}</span><span>{x.units||'—'}</span><span>{money(x.avgTicket)}</span><span><strong>{pct(x.revenueShare)}</strong><i className="shareBar"><i style={{width:`${Math.min(x.revenueShare,100)}%`}}/></i></span></div>)}</div>:<Unavailable title="Fuerza de ventas" text="Se activará al encontrar ventas con ID_VENDEDOR."/>}</section>
+
+//    <section className="panel productsPeek"><div className="panelTitle"><div><h3>Top 10 productos / servicios</h3><p>Vista rápida; el catálogo completo vive en Productos y Promociones.</p></div><PackageSearch size={21}/></div>{data.topProducts?.length?<div className="productPeekList">{data.topProducts.map((x,i)=><article key={x.id}><span>{i+1}</span><div><b>{x.name}</b><small>{x.category}</small></div><div><strong>{money(x.revenue)}</strong><small>Ticket {money(x.avgTicket)} · {pct(x.revenueShare)}</small></div></article>)}</div>:<Unavailable title="Productos" text="Se activará al relacionar VENTAS con ID_PRODUCTO."/>}</section>
+
+//    <section className="panel demographicsPanel"><div className="panelTitle"><div><h3>Perfil demográfico del cliente</h3><p>Quién compra, recompra y presenta mayor ticket.</p></div><UserRoundSearch size={21}/></div><Unavailable title="Demográficos aún no disponibles" text="Casa Margot todavía no registra edad, sexo u otras variables demográficas. Agregarlas a CLIENTES desbloqueará esta lectura."/><div className="demographicGhost"><div/><div/><div/><div/></div></section>
+
+//    <section className="panel questionsPanel"><div className="panelTitle"><div><h3>Preguntas y señales para decidir</h3><p>Lecturas para provocar análisis, no afirmaciones de causalidad.</p></div></div><div className="questionList">{data.questions?.map((q,i)=><article key={q}><span>{i+1}</span><p>{q}</p></article>)}</div></section>
+
+//    <section className="panel activationPanel"><div className="panelTitle"><div><h3>Potencial por desbloquear</h3><p>Información que ampliará la inteligencia de DASH.</p></div></div><div className="activationList">{data.quality?.unavailable?.map(x=><Unavailable key={x.key} title={x.title} text={x.message}/>)}</div></section>
+//   </div>
+//  </div></main>;
+// }
